@@ -1,8 +1,15 @@
 [package]
-name = "bs-clip-cutter"
-version = "0.1.0"
-edition = "2021"
+name="bs-clip-cutter"
+version="0.1.0"
+edition="2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+itertools="0.10.5"
+lazy_static="1.4.0"
+regex="1.7.1"
+time={ version="0.3", features=[ "macros", "formatting", "parsing", "serde", "local-offset" ] }
+serde={ version="1.0", features=[ "derive" ] }
+serde_json="1.0.93"
+matroska = "0.20.1"
