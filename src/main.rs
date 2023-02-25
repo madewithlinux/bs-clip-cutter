@@ -20,25 +20,30 @@ fn main() {
     println!("Hello, world!");
 
     let video_path = r#"C:\Users\jools\Videos\2023-02-24 20-02-23.mkv"#;
-    // let video_length = read_video_length(video_path);
-    // dbg!(video_length);
     let (video_start, video_end) = read_video_timestamp_range(video_path);
     dbg!(video_start, video_end);
 
-    let combined_scrapped_data = read_beatsaber_combined_scrapped_data(COMBINED_SCRAPPED_DATA_PATH);
-    dbg!(combined_scrapped_data.len());
+    // let combined_scrapped_data = read_beatsaber_combined_scrapped_data(COMBINED_SCRAPPED_DATA_PATH);
+    // dbg!(combined_scrapped_data.len());
 
     let song_core_data_cache =
         read_song_core_data_cache(SONG_HASH_DATA_PATH, SONG_DURATION_CACHE_PATH);
-    dbg!(song_core_data_cache.len());
+    // dbg!(song_core_data_cache.len());
 
-    let song_play_data = read_raw_song_play_data(SONG_PLAY_DATA_PATH);
-    dbg!(song_play_data.len());
+    let raw_song_play_data = read_raw_song_play_data(SONG_PLAY_DATA_PATH);
+    // dbg!(song_play_data.len());
 
-    read_log_file(LATEST_LOG_PATH);
+    find_clip_segments(
+        video_start,
+        video_end,
+        &raw_song_play_data,
+        &song_core_data_cache,
+    );
+
+    // read_log_file(LATEST_LOG_PATH);
 }
 
-// region: get info about video file
+// // region: get info about video file
 
 fn read_video_length(video_path: impl AsRef<Path>) -> Duration {
     use matroska::Matroska;
@@ -61,7 +66,7 @@ fn read_video_timestamp_range(video_path: impl AsRef<Path>) -> (OffsetDateTime, 
     (start_timestamp, start_timestamp + video_length)
 }
 
-// endregion
+// // endregion
 
 fn read_log_file(log_file_path: impl AsRef<Path>) {
     let metadata = std::fs::metadata(&log_file_path).unwrap();
@@ -131,7 +136,7 @@ fn get_log_line_time(line: &str) -> Option<Time> {
     }
 }
 
-// region: JSON stuff
+// // region: JSON stuff
 
 pub fn read_from_json_file<T: DeserializeOwned>(file_path: impl AsRef<std::path::Path>) -> T {
     let mut s = String::new();
@@ -162,46 +167,46 @@ fn read_raw_song_play_data(song_play_data_path: impl AsRef<Path>) -> RawSongPlay
     read_from_json_file(song_play_data_path)
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RawCombinedScrappedDataElement {
-    #[serde(rename = "Key")]
-    pub key: String,
-    #[serde(rename = "Hash")]
-    pub hash: String,
-    #[serde(rename = "SongName")]
-    pub song_name: String,
-    #[serde(rename = "SongSubName")]
-    pub song_sub_name: String,
-    #[serde(rename = "SongAuthorName")]
-    pub song_author_name: String,
-    #[serde(rename = "LevelAuthorName")]
-    pub level_author_name: String,
-    // TODO
-    // #[serde(rename = "Diffs")]
-    // pub diffs: String,
-    // #[serde(rename = "Chars")]
-    // pub chars: String,
-    #[serde(rename = "Uploaded")]
-    pub uploaded: String,
-    #[serde(rename = "Uploader")]
-    pub uploader: String,
-    #[serde(rename = "Bpm")]
-    pub bpm: f64,
-    #[serde(rename = "Upvotes")]
-    pub upvotes: i64,
-    #[serde(rename = "Downvotes")]
-    pub downvotes: i64,
-    #[serde(rename = "Duration")]
-    pub duration: i64,
-}
-
-pub type RawCombinedScrappedData = Vec<RawCombinedScrappedDataElement>;
-
-fn read_beatsaber_combined_scrapped_data(
-    combined_scrapped_data_path: impl AsRef<Path>,
-) -> RawCombinedScrappedData {
-    read_from_json_file(combined_scrapped_data_path)
-}
+// #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+// pub struct RawCombinedScrappedDataElement {
+//     #[serde(rename = "Key")]
+//     pub key: String,
+//     #[serde(rename = "Hash")]
+//     pub hash: String,
+//     #[serde(rename = "SongName")]
+//     pub song_name: String,
+//     #[serde(rename = "SongSubName")]
+//     pub song_sub_name: String,
+//     #[serde(rename = "SongAuthorName")]
+//     pub song_author_name: String,
+//     #[serde(rename = "LevelAuthorName")]
+//     pub level_author_name: String,
+//     // TODO
+//     // #[serde(rename = "Diffs")]
+//     // pub diffs: String,
+//     // #[serde(rename = "Chars")]
+//     // pub chars: String,
+//     #[serde(rename = "Uploaded")]
+//     pub uploaded: String,
+//     #[serde(rename = "Uploader")]
+//     pub uploader: String,
+//     #[serde(rename = "Bpm")]
+//     pub bpm: f64,
+//     #[serde(rename = "Upvotes")]
+//     pub upvotes: i64,
+//     #[serde(rename = "Downvotes")]
+//     pub downvotes: i64,
+//     #[serde(rename = "Duration")]
+//     pub duration: i64,
+// }
+//
+// pub type RawCombinedScrappedData = Vec<RawCombinedScrappedDataElement>;
+//
+// fn read_beatsaber_combined_scrapped_data(
+//     combined_scrapped_data_path: impl AsRef<Path>,
+// ) -> RawCombinedScrappedData {
+//     read_from_json_file(combined_scrapped_data_path)
+// }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JsonSongHashDataElement {
@@ -230,16 +235,16 @@ pub struct SongCoreDataElement {
     pub duration: f64,
 }
 
-pub type SongCoreDataByHash = HashMap<String, SongCoreDataElement>;
+pub type SongCoreDataCache = HashMap<String, SongCoreDataElement>;
 
 fn read_song_core_data_cache(
     song_hash_data_path: impl AsRef<Path>,
     song_duration_cache_path: impl AsRef<Path>,
-) -> SongCoreDataByHash {
+) -> SongCoreDataCache {
     let song_hash_data: JsonSongHashData = read_from_json_file(song_hash_data_path);
     let song_duration_cache: JsonSongDurationCache = read_from_json_file(song_duration_cache_path);
 
-    let mut out = SongCoreDataByHash::default();
+    let mut out = SongCoreDataCache::default();
 
     for (path, song_hash_element) in song_hash_data {
         let duration_cache_element = song_duration_cache[&path].clone();
@@ -258,4 +263,37 @@ fn read_song_core_data_cache(
     out
 }
 
-// endregion
+// // endregion
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ClipSegment {
+    pub begin: Duration,
+    pub end: Duration,
+    pub song_hash: String,
+}
+
+fn find_clip_segments(
+    // video_path: impl AsRef<Path>,
+    start_timestamp: OffsetDateTime,
+    end_timestamp: OffsetDateTime,
+    raw_song_play_data: &RawSongPlayData,
+    song_core_data_cache: &SongCoreDataCache,
+) -> Vec<ClipSegment> {
+    let mut ordered_plays = vec![];
+    for (song, plays) in raw_song_play_data.iter() {
+        for play in plays.iter() {
+            let play_timestamp =
+                // OffsetDateTime::from_unix_timestamp_nanos((play.date as i128) * 1_000_000).unwrap();
+                OffsetDateTime::from_unix_timestamp(play.date / 1_000).unwrap();
+            if play_timestamp >= start_timestamp && play_timestamp <= end_timestamp {
+                ordered_plays.push((play_timestamp, song.clone()));
+            }
+        }
+    }
+    ordered_plays.sort();
+    for (play_timestamp, song) in ordered_plays.iter() {
+        println!("{} {}", play_timestamp, song);
+    }
+
+    todo!()
+}
