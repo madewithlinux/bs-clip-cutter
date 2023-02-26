@@ -17,18 +17,15 @@ const SONG_HASH_DATA_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\comm
 const SONG_DURATION_CACHE_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongCore\SongDurationCache.dat"#;
 
 const VIDEOS_FOLDER: &str = r#"C:\Users\jools\Videos\"#;
-// const SEGMENTS_FOLDER: &str = r#"C:\Users\jools\Videos\segments\"#;
 const SEGMENTS_FOLDER: &str = r#"C:\Users\jools\Videos\"#;
 
 fn main() -> Result<()> {
-    // println!("Hello, world!");
     let song_core_data_cache: SongCoreDataCache =
         read_song_core_data_cache(SONG_HASH_DATA_PATH, SONG_DURATION_CACHE_PATH)?;
 
     let song_plays: Vec<SongPlay> = read_song_plays(SONG_PLAY_DATA_PATH)?;
 
     for path in fs::read_dir(VIDEOS_FOLDER)? {
-        // TODO: error handling
         let path = path.unwrap();
         if !path.file_type().unwrap().is_file() {
             continue;
@@ -36,15 +33,11 @@ fn main() -> Result<()> {
         if path.path().extension() != Some("mkv".as_ref()) {
             continue;
         }
-        // if path.file_name().len() != 23 {
-        //     continue;
-        // }
         let video_path = path.path();
         let output_path = Path::new(SEGMENTS_FOLDER).join(format!(
             "{}_segments.csv",
             video_path.file_stem().unwrap().to_string_lossy()
         ));
-        // dbg!(&video_path);
         match make_clip_cuts_csv(&song_core_data_cache, &song_plays, &video_path, output_path) {
             Ok(num_clips) => {
                 println!(
@@ -203,15 +196,12 @@ pub struct JsonSongHashDataElement {
     #[serde(rename = "songHash")]
     pub song_hash: String,
 }
-
 pub type JsonSongHashData = HashMap<String, JsonSongHashDataElement>;
-
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JsonSongDurationCacheElement {
     pub id: String,
     pub duration: f64,
 }
-
 pub type JsonSongDurationCache = HashMap<String, JsonSongDurationCacheElement>;
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -222,7 +212,6 @@ pub struct SongCoreDataElement {
     pub id: String,
     pub duration: f64,
 }
-
 pub type SongCoreDataCache = HashMap<String, SongCoreDataElement>;
 
 fn read_song_core_data_cache(
@@ -287,7 +276,13 @@ fn find_clip_segments(
             song_play: song_play.clone(),
         });
     }
-    // TODO: fixup segment start time for failed maps
+    // fixup segment start time for failed maps (since we don't know the actual start time of the plays, just the end time)
+    for i in 1..segments.len() {
+        if segments[i].start < segments[i - 1].end {
+            // assume one second buffer time
+            segments[i].start = segments[i - 1].end + 1.0;
+        }
+    }
 
     segments
 }
@@ -327,8 +322,13 @@ fn get_song_info_str(song_play: &SongPlay, song_core_data_cache: &SongCoreDataCa
         4 => "Ep",
         _ => "?",
     };
+    let if_fail = if song_play.raw_song_play.last_note == -1 {
+        ""
+    } else {
+        "[F] "
+    };
     format!(
-        "{} - {difficulty} [{}] {}",
+        "{if_fail}{} - {difficulty} [{}] {}",
         song_info.song_name, song_info.song_author_name, song_info.level_author_name
     )
 }
