@@ -1,18 +1,16 @@
-use std::{collections::HashMap, fs, io::Read, path::Path};
+use std::fmt::Write;
+use std::{collections::HashMap, io::Read, path::Path};
 
-use itertools::Itertools;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use time::{
-    macros::format_description, Duration, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset,
+    ext::NumericalDuration, macros::format_description, Duration, OffsetDateTime,
+    PrimitiveDateTime, UtcOffset,
 };
 
-const LATEST_LOG_PATH: &str =
-    r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\Logs\_latest.log"#;
 const SONG_PLAY_DATA_PATH: &str =
     r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongPlayData.json"#;
-const COMBINED_SCRAPPED_DATA_PATH: &str = r#"C:\Users\jools\Documents\GitHub\BeatSaberScrappedData\combinedScrappedData\combinedScrappedData.json"#;
 const SONG_HASH_DATA_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongCore\SongHashData.dat"#;
 const SONG_DURATION_CACHE_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongCore\SongDurationCache.dat"#;
 
@@ -20,30 +18,26 @@ fn main() {
     println!("Hello, world!");
 
     let video_path = r#"C:\Users\jools\Videos\2023-02-24 20-02-23.mkv"#;
-    let (video_start, video_end) = read_video_timestamp_range(video_path);
-    dbg!(video_start, video_end);
+    let output_path = r#"C:\Users\jools\Videos\segments.csv"#;
 
-    // let combined_scrapped_data = read_beatsaber_combined_scrapped_data(COMBINED_SCRAPPED_DATA_PATH);
-    // dbg!(combined_scrapped_data.len());
+    let (video_start, video_end) = read_video_timestamp_range(video_path);
 
     let song_core_data_cache =
         read_song_core_data_cache(SONG_HASH_DATA_PATH, SONG_DURATION_CACHE_PATH);
-    // dbg!(song_core_data_cache.len());
 
-    let raw_song_play_data = read_raw_song_play_data(SONG_PLAY_DATA_PATH);
-    // dbg!(song_play_data.len());
+    let song_plays = read_song_plays(SONG_PLAY_DATA_PATH);
 
-    find_clip_segments(
-        video_start,
-        video_end,
-        &raw_song_play_data,
-        &song_core_data_cache,
-    );
+    let clip_segments =
+        find_clip_segments(video_start, video_end, &song_plays, &song_core_data_cache);
+    let clip_segments_csv = clip_segments_to_csv(&clip_segments, &song_core_data_cache);
+    println!("{}", clip_segments_csv);
 
-    // read_log_file(LATEST_LOG_PATH);
+    std::io::Write::write_all(
+        &mut std::fs::File::create(output_path).unwrap(),
+        clip_segments_csv.as_bytes(),
+    )
+    .unwrap();
 }
-
-// // region: get info about video file
 
 fn read_video_length(video_path: impl AsRef<Path>) -> Duration {
     use matroska::Matroska;
@@ -66,78 +60,6 @@ fn read_video_timestamp_range(video_path: impl AsRef<Path>) -> (OffsetDateTime, 
     (start_timestamp, start_timestamp + video_length)
 }
 
-// // endregion
-
-fn read_log_file(log_file_path: impl AsRef<Path>) {
-    let metadata = std::fs::metadata(&log_file_path).unwrap();
-    let log_created_timestamp = OffsetDateTime::from(metadata.created().unwrap());
-    let local_offset = UtcOffset::local_offset_at(log_created_timestamp).unwrap();
-    // dbg!(log_created_timestamp.to_offset(local_offset));
-    let log_created_timestamp = log_created_timestamp.to_offset(local_offset);
-
-    let file_content = fs::read_to_string(&log_file_path).unwrap();
-    let lines = file_content.lines().collect_vec();
-
-    lazy_static! {
-        static ref RE: Regex =
-            Regex::new(r"\[[A-Z]+ @ (?P<time>\d\d:\d\d:\d\d) \| [a-zA-Z0-9/_\.\- ]+\]").unwrap();
-    }
-    for line in lines.iter() {
-        match get_log_line_time(&line) {
-            Some(_) => {}
-            None => {
-                println!("line didn't match: {line}");
-            }
-        }
-    }
-
-    let start_time = get_log_line_time(lines[0]).unwrap();
-    let end_time = get_log_line_time(lines[lines.len() - 1]).unwrap();
-    println!("start_time: {:?}", start_time);
-    println!("end_time: {:?}", end_time);
-
-    let start_timestamp = log_created_timestamp.replace_time(start_time);
-    let end_timestamp = log_created_timestamp.replace_time(end_time);
-    println!("start_timestamp: {:?}", start_timestamp);
-    println!("end_timestamp: {:?}", end_timestamp);
-
-    let song_play_data = read_raw_song_play_data(SONG_PLAY_DATA_PATH);
-    dbg!(song_play_data.len());
-    let mut ordered_plays = vec![];
-    for (song, plays) in song_play_data.iter() {
-        for play in plays.iter() {
-            let play_timestamp =
-                // OffsetDateTime::from_unix_timestamp_nanos((play.date as i128) * 1_000_000).unwrap();
-                OffsetDateTime::from_unix_timestamp(play.date / 1_000).unwrap();
-            if play_timestamp >= start_timestamp && play_timestamp <= end_timestamp {
-                ordered_plays.push((play_timestamp, song.clone()));
-            }
-        }
-    }
-    ordered_plays.sort();
-    for (play_timestamp, song) in ordered_plays.iter() {
-        println!("{} {}", play_timestamp, song);
-    }
-}
-
-fn get_log_line_time(line: &str) -> Option<Time> {
-    lazy_static! {
-        static ref RE: Regex =
-            Regex::new(r"\[[A-Z]+ @ (?P<time>\d\d:\d\d:\d\d) \| [a-zA-Z0-9/_\.\- ]+\]").unwrap();
-    }
-    match RE.captures(&line) {
-        Some(captures) => {
-            let time_str = &captures.name("time")?.as_str();
-            let format = format_description!("[hour]:[minute]:[second]");
-            let time = Time::parse(&time_str, &format).ok()?;
-            Some(time)
-        }
-        None => None,
-    }
-}
-
-// // region: JSON stuff
-
 pub fn read_from_json_file<T: DeserializeOwned>(file_path: impl AsRef<std::path::Path>) -> T {
     let mut s = String::new();
     std::fs::File::open(&file_path)
@@ -145,6 +67,33 @@ pub fn read_from_json_file<T: DeserializeOwned>(file_path: impl AsRef<std::path:
         .read_to_string(&mut s)
         .unwrap();
     serde_json::from_str(&s).unwrap()
+}
+
+pub fn try_read_from_json_file<T: DeserializeOwned>(
+    file_path: impl AsRef<std::path::Path>,
+) -> anyhow::Result<T> {
+    let mut s = String::new();
+    std::fs::File::open(&file_path)?.read_to_string(&mut s)?;
+    let t = serde_json::from_str(&s)?;
+    Ok(t)
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SongInfoDat {
+    #[serde(rename = "_version")]
+    pub version: String,
+    #[serde(rename = "_songName")]
+    pub song_name: String,
+    #[serde(rename = "_songSubName")]
+    pub song_sub_name: String,
+    #[serde(rename = "_songAuthorName")]
+    pub song_author_name: String,
+    #[serde(rename = "_levelAuthorName")]
+    pub level_author_name: String,
+}
+
+fn try_read_song_info(song_path: impl AsRef<Path>) -> anyhow::Result<SongInfoDat> {
+    try_read_from_json_file(song_path.as_ref().join("info.dat"))
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,46 +116,47 @@ fn read_raw_song_play_data(song_play_data_path: impl AsRef<Path>) -> RawSongPlay
     read_from_json_file(song_play_data_path)
 }
 
-// #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
-// pub struct RawCombinedScrappedDataElement {
-//     #[serde(rename = "Key")]
-//     pub key: String,
-//     #[serde(rename = "Hash")]
-//     pub hash: String,
-//     #[serde(rename = "SongName")]
-//     pub song_name: String,
-//     #[serde(rename = "SongSubName")]
-//     pub song_sub_name: String,
-//     #[serde(rename = "SongAuthorName")]
-//     pub song_author_name: String,
-//     #[serde(rename = "LevelAuthorName")]
-//     pub level_author_name: String,
-//     // TODO
-//     // #[serde(rename = "Diffs")]
-//     // pub diffs: String,
-//     // #[serde(rename = "Chars")]
-//     // pub chars: String,
-//     #[serde(rename = "Uploaded")]
-//     pub uploaded: String,
-//     #[serde(rename = "Uploader")]
-//     pub uploader: String,
-//     #[serde(rename = "Bpm")]
-//     pub bpm: f64,
-//     #[serde(rename = "Upvotes")]
-//     pub upvotes: i64,
-//     #[serde(rename = "Downvotes")]
-//     pub downvotes: i64,
-//     #[serde(rename = "Duration")]
-//     pub duration: i64,
-// }
-//
-// pub type RawCombinedScrappedData = Vec<RawCombinedScrappedDataElement>;
-//
-// fn read_beatsaber_combined_scrapped_data(
-//     combined_scrapped_data_path: impl AsRef<Path>,
-// ) -> RawCombinedScrappedData {
-//     read_from_json_file(combined_scrapped_data_path)
-// }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SongPlay {
+    pub timestamp: OffsetDateTime,
+    pub song_hash: String,
+    pub difficulty: i32,
+    pub characteristic: String,
+    pub raw_song_play: RawSongPlay,
+}
+
+fn read_song_plays(song_play_data_path: impl AsRef<Path>) -> Vec<SongPlay> {
+    let raw_song_play_data = read_raw_song_play_data(song_play_data_path);
+
+    lazy_static! {
+        static ref RE: Regex =
+            Regex::new(r"custom_level_([0-9A-F]{40})___(\d)___([[:alnum:]]+)").unwrap();
+    }
+
+    let mut song_plays = vec![];
+    for (song, plays) in raw_song_play_data.iter() {
+        let Some(captures) = RE.captures(song) else {
+            // println!("unrecognized song: {song}");
+            continue;
+        };
+        let song_hash = captures.get(1).unwrap().as_str();
+        let difficulty_str = captures.get(2).unwrap().as_str();
+        let difficulty = difficulty_str.parse().unwrap();
+        let characteristic = captures.get(3).unwrap().as_str();
+        for play in plays.iter() {
+            let timestamp = OffsetDateTime::from_unix_timestamp(play.date / 1_000).unwrap();
+            song_plays.push(SongPlay {
+                timestamp,
+                song_hash: song_hash.to_string(),
+                difficulty,
+                characteristic: characteristic.to_string(),
+                raw_song_play: play.clone(),
+            });
+        }
+    }
+
+    song_plays
+}
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JsonSongHashDataElement {
@@ -249,7 +199,7 @@ fn read_song_core_data_cache(
     for (path, song_hash_element) in song_hash_data {
         let duration_cache_element = song_duration_cache[&path].clone();
         out.insert(
-            path.clone(),
+            song_hash_element.song_hash.clone(),
             SongCoreDataElement {
                 path,
                 directory_hash: song_hash_element.directory_hash,
@@ -263,37 +213,87 @@ fn read_song_core_data_cache(
     out
 }
 
-// // endregion
-
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClipSegment {
-    pub begin: Duration,
-    pub end: Duration,
+    pub start: f64,
+    pub end: f64,
     pub song_hash: String,
+    pub song_play: SongPlay,
 }
 
 fn find_clip_segments(
-    // video_path: impl AsRef<Path>,
     start_timestamp: OffsetDateTime,
     end_timestamp: OffsetDateTime,
-    raw_song_play_data: &RawSongPlayData,
+    song_plays: &[SongPlay],
     song_core_data_cache: &SongCoreDataCache,
 ) -> Vec<ClipSegment> {
     let mut ordered_plays = vec![];
-    for (song, plays) in raw_song_play_data.iter() {
-        for play in plays.iter() {
-            let play_timestamp =
-                // OffsetDateTime::from_unix_timestamp_nanos((play.date as i128) * 1_000_000).unwrap();
-                OffsetDateTime::from_unix_timestamp(play.date / 1_000).unwrap();
-            if play_timestamp >= start_timestamp && play_timestamp <= end_timestamp {
-                ordered_plays.push((play_timestamp, song.clone()));
-            }
+    for play in song_plays.iter() {
+        if play.timestamp >= start_timestamp && play.timestamp <= end_timestamp {
+            ordered_plays.push((play.timestamp, play.clone()));
         }
     }
-    ordered_plays.sort();
-    for (play_timestamp, song) in ordered_plays.iter() {
-        println!("{} {}", play_timestamp, song);
+    ordered_plays.sort_by_key(|(timestamp, _)| *timestamp);
+
+    // for (play_timestamp, song) in ordered_plays.iter() {
+    //     println!("{} {:?}", play_timestamp, song);
+    // }
+    let mut segments = vec![];
+    for (play_timestamp, song_play) in ordered_plays.iter() {
+        // println!("{} {:?}", play_timestamp, song);
+        let song_data = &song_core_data_cache[&song_play.song_hash];
+        let start =
+            ((*play_timestamp - song_data.duration.seconds()) - start_timestamp).as_seconds_f64();
+        let end = (*play_timestamp - start_timestamp).as_seconds_f64();
+        // println!("{}, {}, {}", start_seconds, end_seconds, song.song_hash);
+        segments.push(ClipSegment {
+            start,
+            end,
+            song_hash: song_play.song_hash.clone(),
+            song_play: song_play.clone(),
+        });
     }
 
-    todo!()
+    segments
+}
+
+fn clip_segments_to_csv(
+    clip_segments: &[ClipSegment],
+    song_core_data_cache: &SongCoreDataCache,
+) -> String {
+    let mut out = String::new();
+    for segment in clip_segments.iter() {
+        let song_info_str = get_song_info_str(&segment.song_play, song_core_data_cache);
+        let song_info_str = format!("\"{}\"", song_info_str.replace("\"", "\"\""));
+        writeln!(
+            &mut out,
+            "{},{},{}",
+            segment.start, segment.end, song_info_str
+        )
+        .unwrap();
+    }
+    out
+}
+
+fn get_song_info_str(song_play: &SongPlay, song_core_data_cache: &SongCoreDataCache) -> String {
+    let song_hash = &song_play.song_hash;
+    let Some(song_core_data) = song_core_data_cache.get(song_hash) else {
+        return song_hash.to_string();
+    };
+    let path = &song_core_data.path;
+    let Ok(song_info) = try_read_song_info(path) else {
+        return song_hash.to_string();
+    };
+    let difficulty = match song_play.difficulty {
+        0 => "E",
+        1 => "M",
+        2 => "H",
+        3 => "E",
+        4 => "E+",
+        _ => "?",
+    };
+    format!(
+        "{} - {difficulty} [{}] {}",
+        song_info.song_name, song_info.song_author_name, song_info.level_author_name
+    )
 }
