@@ -1,4 +1,5 @@
 use std::fmt::Write;
+use std::fs;
 use std::{collections::HashMap, io::Read, path::Path};
 
 use lazy_static::lazy_static;
@@ -14,12 +15,36 @@ const SONG_PLAY_DATA_PATH: &str =
 const SONG_HASH_DATA_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongCore\SongHashData.dat"#;
 const SONG_DURATION_CACHE_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongCore\SongDurationCache.dat"#;
 
+const VIDEOS_FOLDER: &str = r#"C:\Users\jools\Videos\"#;
+// const SEGMENTS_FOLDER: &str = r#"C:\Users\jools\Videos\segments\"#;
+const SEGMENTS_FOLDER: &str = r#"C:\Users\jools\Videos\"#;
+
 fn main() {
-    println!("Hello, world!");
+    // println!("Hello, world!");
 
-    let video_path = r#"C:\Users\jools\Videos\2023-02-24 20-02-23.mkv"#;
-    let output_path = r#"C:\Users\jools\Videos\segments.csv"#;
+    for path in fs::read_dir(VIDEOS_FOLDER).unwrap() {
+        // TODO: error handling
+        let path = path.unwrap();
+        if !path.file_type().unwrap().is_file() {
+            continue;
+        }
+        if path.path().extension() != Some("mkv".as_ref()) {
+            continue;
+        }
+        if path.file_name().len() != 23 {
+            continue;
+        }
+        let video_path = path.path();
+        let output_path = Path::new(SEGMENTS_FOLDER).join(format!(
+            "{}_segments.csv",
+            video_path.file_stem().unwrap().to_string_lossy()
+        ));
+        dbg!(&video_path);
+        make_clip_cuts_csv(&video_path, output_path);
+    }
+}
 
+fn make_clip_cuts_csv(video_path: &Path, output_path: std::path::PathBuf) {
     let (video_start, video_end) = read_video_timestamp_range(video_path);
 
     let song_core_data_cache =
@@ -235,17 +260,12 @@ fn find_clip_segments(
     }
     ordered_plays.sort_by_key(|(timestamp, _)| *timestamp);
 
-    // for (play_timestamp, song) in ordered_plays.iter() {
-    //     println!("{} {:?}", play_timestamp, song);
-    // }
     let mut segments = vec![];
     for (play_timestamp, song_play) in ordered_plays.iter() {
-        // println!("{} {:?}", play_timestamp, song);
         let song_data = &song_core_data_cache[&song_play.song_hash];
         let start =
             ((*play_timestamp - song_data.duration.seconds()) - start_timestamp).as_seconds_f64();
         let end = (*play_timestamp - start_timestamp).as_seconds_f64();
-        // println!("{}, {}, {}", start_seconds, end_seconds, song.song_hash);
         segments.push(ClipSegment {
             start,
             end,
@@ -253,6 +273,7 @@ fn find_clip_segments(
             song_play: song_play.clone(),
         });
     }
+    // TODO: fixup segment start time for failed maps
 
     segments
 }
@@ -289,7 +310,7 @@ fn get_song_info_str(song_play: &SongPlay, song_core_data_cache: &SongCoreDataCa
         1 => "M",
         2 => "H",
         3 => "E",
-        4 => "E+",
+        4 => "Ep",
         _ => "?",
     };
     format!(
