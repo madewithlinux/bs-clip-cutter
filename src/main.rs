@@ -2,6 +2,7 @@ use std::fmt::Write;
 use std::fs;
 use std::{collections::HashMap, io::Read, path::Path};
 
+use anyhow::{Context, Result};
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -19,10 +20,14 @@ const VIDEOS_FOLDER: &str = r#"C:\Users\jools\Videos\"#;
 // const SEGMENTS_FOLDER: &str = r#"C:\Users\jools\Videos\segments\"#;
 const SEGMENTS_FOLDER: &str = r#"C:\Users\jools\Videos\"#;
 
-fn main() {
+fn main() -> Result<()> {
     // println!("Hello, world!");
+    let song_core_data_cache: SongCoreDataCache =
+        read_song_core_data_cache(SONG_HASH_DATA_PATH, SONG_DURATION_CACHE_PATH)?;
 
-    for path in fs::read_dir(VIDEOS_FOLDER).unwrap() {
+    let song_plays: Vec<SongPlay> = read_song_plays(SONG_PLAY_DATA_PATH)?;
+
+    for path in fs::read_dir(VIDEOS_FOLDER)? {
         // TODO: error handling
         let path = path.unwrap();
         if !path.file_type().unwrap().is_file() {
@@ -31,67 +36,77 @@ fn main() {
         if path.path().extension() != Some("mkv".as_ref()) {
             continue;
         }
-        if path.file_name().len() != 23 {
-            continue;
-        }
+        // if path.file_name().len() != 23 {
+        //     continue;
+        // }
         let video_path = path.path();
         let output_path = Path::new(SEGMENTS_FOLDER).join(format!(
             "{}_segments.csv",
             video_path.file_stem().unwrap().to_string_lossy()
         ));
-        dbg!(&video_path);
-        make_clip_cuts_csv(&video_path, output_path);
+        // dbg!(&video_path);
+        match make_clip_cuts_csv(&song_core_data_cache, &song_plays, &video_path, output_path) {
+            Ok(num_clips) => {
+                println!(
+                    "OK: {} : {num_clips:3} segments",
+                    path.file_name().to_string_lossy()
+                )
+            }
+            Err(err) => {
+                eprintln!("FAIL: {} : {:?}", path.file_name().to_string_lossy(), err)
+            }
+        }
     }
+    Ok(())
 }
 
-fn make_clip_cuts_csv(video_path: &Path, output_path: std::path::PathBuf) {
-    let (video_start, video_end) = read_video_timestamp_range(video_path);
-
-    let song_core_data_cache =
-        read_song_core_data_cache(SONG_HASH_DATA_PATH, SONG_DURATION_CACHE_PATH);
-
-    let song_plays = read_song_plays(SONG_PLAY_DATA_PATH);
+fn make_clip_cuts_csv(
+    song_core_data_cache: &SongCoreDataCache,
+    song_plays: &[SongPlay],
+    video_path: &Path,
+    output_path: std::path::PathBuf,
+) -> Result<usize> {
+    let (video_start, video_end) = read_video_timestamp_range(video_path)?;
 
     let clip_segments =
         find_clip_segments(video_start, video_end, &song_plays, &song_core_data_cache);
     let clip_segments_csv = clip_segments_to_csv(&clip_segments, &song_core_data_cache);
-    println!("{}", clip_segments_csv);
 
     std::io::Write::write_all(
-        &mut std::fs::File::create(output_path).unwrap(),
+        &mut std::fs::File::create(output_path)?,
         clip_segments_csv.as_bytes(),
-    )
-    .unwrap();
+    )?;
+
+    Ok(clip_segments.len())
 }
 
-fn read_video_length(video_path: impl AsRef<Path>) -> Duration {
+fn read_video_length(video_path: impl AsRef<Path>) -> Result<Duration> {
     use matroska::Matroska;
     use std::fs::File;
-    let f = File::open(video_path).unwrap();
-    let matroska = Matroska::open(f).unwrap();
-    matroska.info.duration.unwrap().try_into().unwrap()
+    let f = File::open(video_path)?;
+    let matroska = Matroska::open(f)?;
+    let duration: std::time::Duration = matroska.info.duration.context("no duration")?;
+    duration.try_into().context("convert duration")
 }
 
-fn read_video_timestamp_range(video_path: impl AsRef<Path>) -> (OffsetDateTime, OffsetDateTime) {
+fn read_video_timestamp_range(
+    video_path: impl AsRef<Path>,
+) -> Result<(OffsetDateTime, OffsetDateTime)> {
     let video_filename_timestamp_format =
         format_description!("[year]-[month]-[day] [hour]-[minute]-[second]");
-    let video_file_stem = video_path.as_ref().file_stem().unwrap().to_str().unwrap();
+    let video_file_stem = video_path
+        .as_ref()
+        .file_stem()
+        .context("stem")?
+        .to_str()
+        .context("to str")?;
     let start_timestamp =
-        PrimitiveDateTime::parse(video_file_stem, video_filename_timestamp_format).unwrap();
-    let start_timestamp = start_timestamp.assume_offset(UtcOffset::current_local_offset().unwrap());
+        PrimitiveDateTime::parse(video_file_stem, video_filename_timestamp_format)?;
+    let start_timestamp = start_timestamp.assume_offset(UtcOffset::current_local_offset()?);
 
-    let video_length = read_video_length(video_path);
+    let video_length = read_video_length(video_path)?;
 
-    (start_timestamp, start_timestamp + video_length)
-}
-
-pub fn read_from_json_file<T: DeserializeOwned>(file_path: impl AsRef<std::path::Path>) -> T {
-    let mut s = String::new();
-    std::fs::File::open(&file_path)
-        .unwrap()
-        .read_to_string(&mut s)
-        .unwrap();
-    serde_json::from_str(&s).unwrap()
+    Ok((start_timestamp, start_timestamp + video_length))
 }
 
 pub fn try_read_from_json_file<T: DeserializeOwned>(
@@ -137,10 +152,6 @@ pub struct RawSongPlay {
 
 pub type RawSongPlayData = HashMap<String, Vec<RawSongPlay>>;
 
-fn read_raw_song_play_data(song_play_data_path: impl AsRef<Path>) -> RawSongPlayData {
-    read_from_json_file(song_play_data_path)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SongPlay {
     pub timestamp: OffsetDateTime,
@@ -150,8 +161,8 @@ pub struct SongPlay {
     pub raw_song_play: RawSongPlay,
 }
 
-fn read_song_plays(song_play_data_path: impl AsRef<Path>) -> Vec<SongPlay> {
-    let raw_song_play_data = read_raw_song_play_data(song_play_data_path);
+fn read_song_plays(song_play_data_path: impl AsRef<Path>) -> Result<Vec<SongPlay>> {
+    let raw_song_play_data: RawSongPlayData = try_read_from_json_file(song_play_data_path)?;
 
     lazy_static! {
         static ref RE: Regex =
@@ -166,7 +177,9 @@ fn read_song_plays(song_play_data_path: impl AsRef<Path>) -> Vec<SongPlay> {
         };
         let song_hash = captures.get(1).unwrap().as_str();
         let difficulty_str = captures.get(2).unwrap().as_str();
-        let difficulty = difficulty_str.parse().unwrap();
+        let Ok(difficulty) = difficulty_str.parse() else {
+            continue;
+        };
         let characteristic = captures.get(3).unwrap().as_str();
         for play in plays.iter() {
             let timestamp = OffsetDateTime::from_unix_timestamp(play.date / 1_000).unwrap();
@@ -180,7 +193,7 @@ fn read_song_plays(song_play_data_path: impl AsRef<Path>) -> Vec<SongPlay> {
         }
     }
 
-    song_plays
+    Ok(song_plays)
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
@@ -215,9 +228,10 @@ pub type SongCoreDataCache = HashMap<String, SongCoreDataElement>;
 fn read_song_core_data_cache(
     song_hash_data_path: impl AsRef<Path>,
     song_duration_cache_path: impl AsRef<Path>,
-) -> SongCoreDataCache {
-    let song_hash_data: JsonSongHashData = read_from_json_file(song_hash_data_path);
-    let song_duration_cache: JsonSongDurationCache = read_from_json_file(song_duration_cache_path);
+) -> Result<SongCoreDataCache> {
+    let song_hash_data: JsonSongHashData = try_read_from_json_file(song_hash_data_path)?;
+    let song_duration_cache: JsonSongDurationCache =
+        try_read_from_json_file(song_duration_cache_path)?;
 
     let mut out = SongCoreDataCache::default();
 
@@ -235,7 +249,7 @@ fn read_song_core_data_cache(
         );
     }
 
-    out
+    Ok(out)
 }
 
 #[derive(Debug, Clone, PartialEq)]
