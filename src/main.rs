@@ -225,6 +225,9 @@ fn read_song_core_data_cache(
     let mut out = SongCoreDataCache::default();
 
     for (path, song_hash_element) in song_hash_data {
+        if !song_duration_cache.contains_key(&path) {
+            continue;
+        }
         let duration_cache_element = song_duration_cache[&path].clone();
         out.insert(
             song_hash_element.song_hash.clone(),
