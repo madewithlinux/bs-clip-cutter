@@ -1,5 +1,6 @@
 use std::fmt::Write;
 use std::fs;
+use std::path::MAIN_SEPARATOR_STR;
 use std::{collections::HashMap, io::Read, path::Path};
 
 use anyhow::{Context, Result};
@@ -11,6 +12,7 @@ use time::{
     PrimitiveDateTime, UtcOffset,
 };
 
+const BEATSABER_INSTALL_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber"#;
 const SONG_PLAY_DATA_PATH: &str =
     r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongPlayData.json"#;
 const SONG_HASH_DATA_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongCore\SongHashData.dat"#;
@@ -20,8 +22,11 @@ const VIDEOS_FOLDER: &str = r#"C:\Users\jools\Videos\"#;
 const SEGMENTS_FOLDER: &str = r#"C:\Users\jools\Videos\"#;
 
 fn main() -> Result<()> {
-    let song_core_data_cache: SongCoreDataCache =
-        read_song_core_data_cache(SONG_HASH_DATA_PATH, SONG_DURATION_CACHE_PATH)?;
+    let song_core_data_cache: SongCoreDataCache = read_song_core_data_cache(
+        BEATSABER_INSTALL_PATH,
+        SONG_HASH_DATA_PATH,
+        SONG_DURATION_CACHE_PATH,
+    )?;
 
     let song_plays: Vec<SongPlay> = read_song_plays(SONG_PLAY_DATA_PATH)?;
 
@@ -206,7 +211,7 @@ pub type JsonSongDurationCache = HashMap<String, JsonSongDurationCacheElement>;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct SongCoreDataElement {
-    pub path: String,
+    pub absolute_path: String,
     pub directory_hash: i64,
     pub song_hash: String,
     pub id: String,
@@ -215,6 +220,7 @@ pub struct SongCoreDataElement {
 pub type SongCoreDataCache = HashMap<String, SongCoreDataElement>;
 
 fn read_song_core_data_cache(
+    beatsaber_install_path: &str,
     song_hash_data_path: impl AsRef<Path>,
     song_duration_cache_path: impl AsRef<Path>,
 ) -> Result<SongCoreDataCache> {
@@ -224,15 +230,28 @@ fn read_song_core_data_cache(
 
     let mut out = SongCoreDataCache::default();
 
+    let relative_path_prefix: String = format!(".{}", MAIN_SEPARATOR_STR);
+
     for (path, song_hash_element) in song_hash_data {
         if !song_duration_cache.contains_key(&path) {
+            eprintln!("duration cache is missing {}", &path);
             continue;
         }
         let duration_cache_element = song_duration_cache[&path].clone();
+        let absolute_path = if path.starts_with(&relative_path_prefix) {
+            format!(
+                "{}{}{}",
+                beatsaber_install_path,
+                &MAIN_SEPARATOR_STR,
+                &path[2..]
+            )
+        } else {
+            path
+        };
         out.insert(
             song_hash_element.song_hash.clone(),
             SongCoreDataElement {
-                path,
+                absolute_path,
                 directory_hash: song_hash_element.directory_hash,
                 song_hash: song_hash_element.song_hash,
                 id: duration_cache_element.id,
@@ -313,8 +332,9 @@ fn get_song_info_str(song_play: &SongPlay, song_core_data_cache: &SongCoreDataCa
     let Some(song_core_data) = song_core_data_cache.get(song_hash) else {
         return song_hash.to_string();
     };
-    let path = &song_core_data.path;
+    let path = &song_core_data.absolute_path;
     let Ok(song_info) = try_read_song_info(path) else {
+        eprintln!("failed to read song info: {}", path);
         return song_hash.to_string();
     };
     let difficulty = match song_play.difficulty {
