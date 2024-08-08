@@ -12,11 +12,14 @@ use time::{
     PrimitiveDateTime, UtcOffset,
 };
 
-const BEATSABER_INSTALL_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber"#;
-const SONG_PLAY_DATA_PATH: &str =
-    r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongPlayData.json"#;
-const SONG_HASH_DATA_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongCore\SongHashData.dat"#;
-const SONG_DURATION_CACHE_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongCore\SongDurationCache.dat"#;
+// const BEATSABER_INSTALL_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber"#;
+// const SONG_PLAY_DATA_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongPlayData.json"#;
+// const SONG_HASH_DATA_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongCore\SongHashData.dat"#;
+// const SONG_DURATION_CACHE_PATH: &str = r#"C:\Program Files (x86)\Steam\steamapps\common\Beat Saber\UserData\SongCore\SongDurationCache.dat"#;
+const BEATSABER_INSTALL_PATH: &str = r#"C:\Users\jools\Documents\BSManager\BSInstances\1.37.0"#;
+const SONG_PLAY_DATA_PATH: &str = r#"C:\Users\jools\Documents\BSManager\BSInstances\1.37.0\UserData\SongPlayData.json"#;
+const SONG_HASH_DATA_PATH: &str = r#"C:\Users\jools\Documents\BSManager\BSInstances\1.37.0\UserData\SongCore\SongHashData.dat"#;
+const SONG_DURATION_CACHE_PATH: &str = r#"C:\Users\jools\Documents\BSManager\BSInstances\1.37.0\UserData\SongCore\SongDurationCache.dat"#;
 
 const VIDEOS_FOLDER: &str = r#"C:\Users\jools\Videos\"#;
 const SEGMENTS_FOLDER: &str = r#"C:\Users\jools\Videos\"#;
@@ -144,7 +147,7 @@ pub struct RawSongPlay {
     pub raw_score: i64,
     #[serde(rename = "LastNote")]
     pub last_note: i64,
-    #[serde(rename = "Param")]
+    #[serde(rename = "Param", default)]
     pub param: i64,
 }
 
